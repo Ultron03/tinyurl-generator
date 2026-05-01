@@ -1,8 +1,12 @@
 package com.tinyurl.controller;
 
+import com.tinyurl.dto.AnalyticsResponse;
 import com.tinyurl.dto.ShortenRequest;
 import com.tinyurl.dto.ShortenResponse;
+import com.tinyurl.exception.GlobalExceptionHandler;
 import com.tinyurl.service.UrlService;
+
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpHeaders;
@@ -24,10 +28,20 @@ public class UrlController {
     }
 
     @GetMapping("/{shortCode}")
-    public ResponseEntity<Void> redirect(@PathVariable String shortCode) {
-        String longUrl = urlService.getLongUrl(shortCode);
-        HttpHeaders headers = new HttpHeaders();
-        headers.setLocation(URI.create(longUrl));
-        return ResponseEntity.status(HttpStatus.FOUND).headers(headers).build();
+    public ResponseEntity<Void> redirect(@PathVariable String shortCode,HttpServletRequest request) {
+      String ip = request.getHeader("X-Forwarded-For");                                                                                                                                                                                                     
+      if (ip == null) ip = request.getRemoteAddr();  // fallback if no proxy                                                                                                                                                                                
+                                                                                                                                                                                                                                                            
+      String userAgent = request.getHeader("User-Agent");                                                                                                                                                                                                   
+                                                                                                                                                                                                                                                            
+      String longUrl = urlService.getLongUrl(shortCode, ip, userAgent);                                                                                                                                                                                     
+      HttpHeaders headers = new HttpHeaders();
+      headers.setLocation(URI.create(longUrl));                                                                                                                                                                                                             
+      return ResponseEntity.status(HttpStatus.FOUND).headers(headers).build();
+    }
+
+    @GetMapping("api/v1/analytics/{shortCode}")
+    public ResponseEntity<AnalyticsResponse> analyticsOfUrl(@PathVariable String shortCode) {
+        return ResponseEntity.ok(urlService.getAnalytics(shortCode));
     }
 }

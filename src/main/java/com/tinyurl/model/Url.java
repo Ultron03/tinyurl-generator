@@ -31,4 +31,8 @@ public class Url {
     @Builder.Default
     @Column(nullable = false)
     private Long clickCount = 0L;
+
+    @Builder.Default
+    @Column(nullable = false)
+    private LocalDateTime lastAccessTime = LocalDateTime.now();
 }
