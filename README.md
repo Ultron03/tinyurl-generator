@@ -11,16 +11,16 @@ A URL shortener with click analytics: Spring Boot 4 (Java 21), PostgreSQL and Re
 
 ```mermaid
 graph LR
-    UI[React + Vite] -->|POST /api/v1/shorten<br/>GET /api/v1/analytics/:code| API
-    Browser -->|GET /:code| API
+    UI[React + Vite] -->|"POST /api/v1/shorten<br/>GET /api/v1/analytics/:code"| API
+    Browser -->|"GET /:code"| API
     subgraph Spring Boot
         API[UrlController] --> S[UrlService]
         S --> B[Base62Service]
-        S --> L[UrlLookUpService<br/>@Cacheable]
-        S -.->|@Async| K[ClickRecorder]
+        S --> L["UrlLookUpService<br/>@Cacheable"]
+        S -.->|"@Async"| K[ClickRecorder]
         L --> R[JPA repositories]
         K --> R
-        C[UrlCleanupService<br/>@Scheduled 02:00] --> R
+        C["UrlCleanupService<br/>@Scheduled 02:00"] --> R
     end
     L --> RD[(Redis<br/>urls cache)]
     R --> DB[(PostgreSQL<br/>urls, url_click)]
