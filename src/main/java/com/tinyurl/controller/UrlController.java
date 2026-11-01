@@ -29,14 +29,12 @@ public class UrlController {
 
     @GetMapping("/{shortCode}")
     public ResponseEntity<Void> redirect(@PathVariable String shortCode,HttpServletRequest request) {
-      String ip = request.getHeader("X-Forwarded-For");                                                                                                                                                                                                     
-      if (ip == null) ip = request.getRemoteAddr();  // fallback if no proxy                                                                                                                                                                                
-                                                                                                                                                                                                                                                            
-      String userAgent = request.getHeader("User-Agent");                                                                                                                                                                                                   
-                                                                                                                                                                                                                                                            
-      String longUrl = urlService.getLongUrl(shortCode, ip, userAgent);                                                                                                                                                                                     
+      String ip = request.getRemoteAddr(); // real client IP, resolved by RemoteIpValve from trusted proxies only
+      String userAgent = request.getHeader("User-Agent");
+
+      String longUrl = urlService.getLongUrl(shortCode, ip, userAgent);
       HttpHeaders headers = new HttpHeaders();
-      headers.setLocation(URI.create(longUrl));                                                                                                                                                                                                             
+      headers.setLocation(URI.create(longUrl));
       return ResponseEntity.status(HttpStatus.FOUND).headers(headers).build();
     }
 

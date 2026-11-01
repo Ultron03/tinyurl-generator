@@ -19,4 +19,9 @@ public interface UrlRepository extends JpaRepository<Url, Long> {
     @Modifying
     @Query("DELETE FROM Url u WHERE u.lastAccessTime <= :now AND u.clickCount < 10")
     int deleteWhereLastAccessTimeBefore90DaysAndClickCountIsLessThan10(LocalDateTime now);
+
+	@Modifying
+	@Query("UPDATE Url u SET u.clickCount = u.clickCount + 1, u.lastAccessTime = :now WHERE u.id = :id")
+	int recordAccess(Long id, LocalDateTime now);
+
 }

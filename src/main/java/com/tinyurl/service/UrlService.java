@@ -1,21 +1,22 @@
 package com.tinyurl.service;
 
+import java.time.LocalDateTime;
+
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.stereotype.Service;
+
 import com.tinyurl.dto.AnalyticsResponse;
 import com.tinyurl.dto.ShortenRequest;
 import com.tinyurl.dto.ShortenResponse;
 import com.tinyurl.exception.UrlExpiredException;
 import com.tinyurl.exception.UrlNotFoundException;
 import com.tinyurl.model.Url;
-import com.tinyurl.model.UrlClick;
 import com.tinyurl.repository.UrlClickRepository;
 import com.tinyurl.repository.UrlRepository;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.time.LocalDateTime;
 
 @Slf4j
 @Service
@@ -25,77 +26,75 @@ public class UrlService {
     private final UrlRepository urlRepository;
     private final UrlClickRepository urlClickRepository;
     private final Base62Service base62Service;
+	private static final int MAX_CODE_ATTEMPTS = 5;
+	private final ClickRecorder clickRecorder;
+	private final UrlLookUpService urlLookUpService;
 
     @Value("${app.base-url}")
     private String baseUrl;
 
-    @Transactional
-    public ShortenResponse shorten(ShortenRequest request) {
-        log.info("shorten() start — longUrl={}, customAlias={}, expiryDays={}",
-                request.getLongUrl(), request.getCustomAlias(), request.getExpiryDays());
+	public ShortenResponse shorten(ShortenRequest request) {
+		log.info("shorten() start — longUrl={}, customAlias={}, expiryDays={}",
+				request.getLongUrl(), request.getCustomAlias(), request.getExpiryDays());
 
-        LocalDateTime now = LocalDateTime.now();
+		String alias = request.getCustomAlias();
+		if (alias != null && !alias.isBlank()) {
+			return toResponse(saveWithCode(request, alias));
+		}
 
-        Url url = Url.builder()
-                .longUrl(request.getLongUrl())
-                .createdAt(now)
-                .expiresAt(request.getExpiryDays() != null ? now.plusDays(request.getExpiryDays()) : null)
-                .lastAccessTime(now)
-                .build();
+		for (int attempt = 1; attempt <= MAX_CODE_ATTEMPTS; attempt++) {
+			String code = base62Service.randomCode();
+			if (urlRepository.existsByShortCode(code)) {
+				log.debug("Generated code already taken — code={}, attempt={}", code, attempt);
+				continue;
+			}
+			try {
+				return toResponse(saveWithCode(request, code));
+			} catch (DataIntegrityViolationException e) {
+				log.warn("Generated code collided on insert — code={}, attempt={}", code, attempt);
+			}
+		}
+		throw new IllegalStateException("Could not generate a unique short code after " + MAX_CODE_ATTEMPTS + " attempts");
+	}
 
-        url = urlRepository.save(url);
-        log.debug("URL entity persisted — id={}", url.getId());
+	private Url saveWithCode(ShortenRequest request, String shortCode) {
+		LocalDateTime now = LocalDateTime.now();
+		Url url = Url.builder()
+				.longUrl(request.getLongUrl())
+				.shortCode(shortCode)
+				.createdAt(now)
+				.expiresAt(request.getExpiryDays() != null ? now.plusDays(request.getExpiryDays()) : null)
+				.lastAccessTime(now)
+				.build();
+		url = urlRepository.save(url);
+		log.info("URL created — id={}, shortCode={}, expiresAt={}", url.getId(), shortCode, url.getExpiresAt());
+		return url;
+	}
 
-        String shortCode = (request.getCustomAlias() != null && !request.getCustomAlias().isBlank())
-                ? request.getCustomAlias()
-                : base62Service.encode(url.getId());
+	private ShortenResponse toResponse(Url url) {
+		return ShortenResponse.builder()
+				.shortUrl(baseUrl + "/" + url.getShortCode())
+				.shortCode(url.getShortCode())
+				.longUrl(url.getLongUrl())
+				.createdAt(url.getCreatedAt())
+				.expiresAt(url.getExpiresAt())
+				.build();
+	}
 
-        url.setShortCode(shortCode);
-        urlRepository.save(url);
+	public String getLongUrl(String shortCode, String ipAddress, String userAgent) {
+		log.info("getLongUrl() start — shortCode={}, ip={}", shortCode, ipAddress);
 
-        log.info("URL created — id={}, shortCode={}, expiresAt={}", url.getId(), shortCode, url.getExpiresAt());
+		CachedUrl url = urlLookUpService.find(shortCode);
 
-        return ShortenResponse.builder()
-                .shortUrl(baseUrl + "/" + shortCode)
-                .shortCode(shortCode)
-                .longUrl(url.getLongUrl())
-                .createdAt(url.getCreatedAt())
-                .expiresAt(url.getExpiresAt())
-                .build();
-    }
+		if (url.expiresAt() != null && url.expiresAt().isBefore(LocalDateTime.now())) {
+			log.warn("URL expired — shortCode={}, expiredAt={}", shortCode, url.expiresAt());
+			throw new UrlExpiredException(shortCode);
+		}
 
-    @Transactional
-    public String getLongUrl(String shortCode, String ipAddress, String userAgent) {
-        log.info("getLongUrl() start — shortCode={}, ip={}", shortCode, ipAddress);
+		clickRecorder.recordClick(url.id(), ipAddress, userAgent, LocalDateTime.now());
+		return url.longUrl();
+	}
 
-        Url url = urlRepository.findByShortCode(shortCode)
-                .orElseThrow(() -> {
-                    log.warn("URL not found — shortCode={}", shortCode);
-                    return new UrlNotFoundException(shortCode);
-                });
-
-        if (url.getExpiresAt() != null && url.getExpiresAt().isBefore(LocalDateTime.now())) {
-            log.warn("URL expired — shortCode={}, expiredAt={}", shortCode, url.getExpiresAt());
-            throw new UrlExpiredException(shortCode);
-        }
-
-        url.setLastAccessTime(LocalDateTime.now());
-        url.setClickCount(url.getClickCount() + 1);
-
-        UrlClick urlClick = UrlClick.builder()
-                .url(url)
-                .clickedAt(LocalDateTime.now())
-                .ipAddress(ipAddress)
-                .userAgent(userAgent)
-                .build();
-
-        urlClickRepository.save(urlClick);
-        log.info("Click recorded — shortCode={}, urlId={}, totalClicks={}, ip={}",
-                shortCode, url.getId(), url.getClickCount(), ipAddress);
-
-        log.info("getLongUrl() end — shortCode={} redirecting to {}", shortCode, url.getLongUrl());
-        return url.getLongUrl();
-    }
 
     public AnalyticsResponse getAnalytics(String shortCode) {
         log.info("getAnalytics() start — shortCode={}", shortCode);

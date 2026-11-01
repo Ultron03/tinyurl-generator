@@ -1,20 +1,21 @@
 package com.tinyurl.service;
 
+import java.security.SecureRandom;
+
 import org.springframework.stereotype.Service;
 
 @Service
 public class Base62Service {
 
     private static final String CHARS = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-    private static final int BASE = 62;
+    private static final int CODE_LENGTH = 7;
+    private static final SecureRandom RANDOM = new SecureRandom();
 
-    public String encode(long id) {
-        if (id == 0) return String.valueOf(CHARS.charAt(0));
-        StringBuilder sb = new StringBuilder();
-        while (id > 0) {
-            sb.append(CHARS.charAt((int) (id % BASE)));
-            id /= BASE;
-        }
-        return sb.reverse().toString();
-    }
+	public String randomCode() {
+		StringBuilder code = new StringBuilder(CODE_LENGTH);
+		for (int i = 0; i < CODE_LENGTH; i++) {
+			code.append(CHARS.charAt(RANDOM.nextInt(CHARS.length())));
+		}
+		return code.toString();
+	}
 }

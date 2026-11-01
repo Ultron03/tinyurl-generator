@@ -1,0 +1,1 @@
+CREATE INDEX idx_url_click_url_id_clicked_at ON url_click (url_id, clicked_at);
